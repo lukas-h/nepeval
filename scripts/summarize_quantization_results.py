@@ -26,6 +26,11 @@ def quantization_for_model(model: str) -> str:
     return suffix if suffix in {"bf16", "q8", "q4"} else "unknown"
 
 
+def quantization_sort_key(row: dict[str, Any]) -> tuple[int, str]:
+    rank = {"bf16": 0, "q8": 1, "q4": 2}
+    return rank.get(row["quantization"], 99), row["model"]
+
+
 def load_model_summaries(run_dir: Path) -> list[dict[str, Any]]:
     summaries = []
     for summary_path in sorted((run_dir / "models").glob("*/summary.json")):
@@ -45,13 +50,36 @@ def metric(value: float | None) -> str:
 
 
 def write_markdown(path: Path, rows: list[dict[str, Any]]) -> None:
+    generation_settings = {
+        json.dumps(row.get("generation", {}), sort_keys=True) for row in rows
+    }
     lines = [
         "# HimalayaGPT Quantization Comparison",
         "",
+        "Separate raw benchmark artifacts are preserved for each quantization.",
+        "",
+    ]
+    if len(generation_settings) == 1:
+        lines.extend(
+            [
+                f"- Shared generation settings: `{next(iter(generation_settings))}`",
+                "",
+            ]
+        )
+    else:
+        lines.extend(
+            [
+                "- Generation settings differ by row; inspect the JSON comparison for details.",
+                "",
+            ]
+        )
+    lines.extend(
+        [
         "| Model | Quantization | Prompt Strict | Inst Strict | Prompt Loose | Inst Loose | Errors | Samples |",
         "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |",
-    ]
-    for row in sorted(rows, key=lambda item: item["model"]):
+        ]
+    )
+    for row in sorted(rows, key=quantization_sort_key):
         lines.append(
             "| {model} | {quantization} | {prompt_strict} | {inst_strict} | {prompt_loose} | {inst_loose} | {errors} | {samples} |".format(
                 model=row["model"],

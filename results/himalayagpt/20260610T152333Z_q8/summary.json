@@ -1,0 +1,89 @@
+{
+  "run_id": "20260610T152333Z_q8",
+  "api_base_url": "https://himalayagpt.api.scalabs.ai/v1",
+  "models": [
+    {
+      "examples": 831,
+      "errored_examples": 0,
+      "tracks": {
+        "indicifeval-ground": {
+          "examples": 341,
+          "errored_examples": 0,
+          "prompt_level_strict_acc": 0.31085043988269795,
+          "inst_level_strict_acc": 0.31085043988269795,
+          "prompt_level_loose_acc": 0.3870967741935484,
+          "inst_level_loose_acc": 0.3870967741935484,
+          "avg_latency_sec": 19.51560736969325,
+          "total_latency_sec": 6654.822113065398,
+          "avg_response_chars": 472.03812316715545,
+          "finish_reason_counts": {
+            "length": 276,
+            "stop": 65
+          }
+        },
+        "indicifeval-trans": {
+          "examples": 490,
+          "errored_examples": 0,
+          "prompt_level_strict_acc": 0.2,
+          "inst_level_strict_acc": 0.30686406460296095,
+          "prompt_level_loose_acc": 0.21428571428571427,
+          "inst_level_loose_acc": 0.3283983849259758,
+          "avg_latency_sec": 16.66362135072443,
+          "total_latency_sec": 8165.174461854971,
+          "avg_response_chars": 404.51428571428573,
+          "finish_reason_counts": {
+            "stop": 173,
+            "length": 317
+          }
+        }
+      },
+      "prompt_level_strict_acc": 0.24548736462093862,
+      "inst_level_strict_acc": 0.3081180811808118,
+      "prompt_level_loose_acc": 0.2851985559566787,
+      "inst_level_loose_acc": 0.34686346863468637,
+      "avg_latency_sec": 17.833930896414405,
+      "total_latency_sec": 14819.99657492037,
+      "model": "himalaya-q8",
+      "started_at": "2026-06-10T15:23:45.324578+00:00",
+      "completed_at": "2026-06-10T15:54:42.097288+00:00",
+      "generation": {
+        "temperature": 0.0,
+        "max_tokens": 256,
+        "seed": 1234
+      }
+    }
+  ],
+  "discovered_models": [
+    {
+      "id": "himalaya-bf16",
+      "object": "model",
+      "created": 0,
+      "owned_by": "himalaya-ai"
+    },
+    {
+      "id": "himalaya-q8",
+      "object": "model",
+      "created": 0,
+      "owned_by": "himalaya-ai"
+    },
+    {
+      "id": "himalaya-q4",
+      "object": "model",
+      "created": 0,
+      "owned_by": "himalaya-ai"
+    }
+  ],
+  "tasks": [
+    "indicifeval-ground",
+    "indicifeval-trans"
+  ],
+  "examples_per_model": 831,
+  "limit_per_track": null,
+  "generation": {
+    "temperature": 0.0,
+    "max_tokens": 256,
+    "seed": 1234
+  },
+  "started_at": "2026-06-10T15:23:45.324343+00:00",
+  "completed_at": "2026-06-10T15:54:42.118018+00:00"
+}
