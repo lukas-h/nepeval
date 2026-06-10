@@ -51,7 +51,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--seed", type=int, default=1234)
     parser.add_argument("--timeout", type=float, default=300.0)
     parser.add_argument("--retries", type=int, default=3)
-    parser.add_argument("--concurrency", type=int, default=2)
+    parser.add_argument("--concurrency", type=int, default=8)
     parser.add_argument("--limit", type=int, default=None, help="Optional per-track smoke-test limit.")
     parser.add_argument("--store-raw-api-response", action=argparse.BooleanOptionalAction, default=True)
     return parser.parse_args()
@@ -230,6 +230,12 @@ def write_jsonl(path: Path, rows: list[dict[str, Any]]) -> None:
             handle.write("\n")
 
 
+def append_jsonl(handle, row: dict[str, Any]) -> None:
+    handle.write(json.dumps(row, ensure_ascii=False))
+    handle.write("\n")
+    handle.flush()
+
+
 def mean_bool(values: list[bool]) -> float | None:
     if not values:
         return None
@@ -316,8 +322,10 @@ def run_model(
 ) -> dict[str, Any]:
     model_dir = output_dir / "models" / model
     model_dir.mkdir(parents=True, exist_ok=True)
+    samples_path = model_dir / "samples.jsonl"
+    progress_path = model_dir / "progress.json"
     started_at = datetime.now(timezone.utc).isoformat()
-    print(f"running {model} on {len(docs)} Nepali examples")
+    print(f"running {model} on {len(docs)} Nepali examples", flush=True)
 
     samples: list[dict[str, Any]] = []
     with concurrent.futures.ThreadPoolExecutor(max_workers=args.concurrency) as executor:
@@ -333,11 +341,21 @@ def run_model(
             )
             for doc in docs
         ]
-        for completed, future in enumerate(concurrent.futures.as_completed(futures), start=1):
-            sample = future.result()
-            samples.append(sample)
-            if completed % 25 == 0 or completed == len(futures):
-                print(f"  {model}: {completed}/{len(futures)}")
+        with samples_path.open("w", encoding="utf-8") as samples_handle:
+            for completed, future in enumerate(concurrent.futures.as_completed(futures), start=1):
+                sample = future.result()
+                samples.append(sample)
+                append_jsonl(samples_handle, sample)
+                if completed % 25 == 0 or completed == len(futures):
+                    progress = {
+                        "model": model,
+                        "completed_examples": completed,
+                        "total_examples": len(futures),
+                        "errored_examples": sum(1 for item in samples if not item["ok"]),
+                        "updated_at": datetime.now(timezone.utc).isoformat(),
+                    }
+                    write_json(progress_path, progress)
+                    print(f"  {model}: {completed}/{len(futures)}", flush=True)
 
     samples.sort(key=lambda sample: (sample["track"], sample["dataset_index"]))
     summary = summarize_samples(samples)
@@ -353,7 +371,7 @@ def run_model(
             },
         }
     )
-    write_jsonl(model_dir / "samples.jsonl", samples)
+    write_jsonl(samples_path, samples)
     write_json(model_dir / "summary.json", summary)
     return summary
 
@@ -439,7 +457,7 @@ def main() -> int:
     }
     write_json(output_dir / "summary.json", run_summary)
     write_markdown_summary(output_dir / "summary.md", run_summary)
-    print(f"wrote benchmark artifacts -> {output_dir}")
+    print(f"wrote benchmark artifacts -> {output_dir}", flush=True)
     return 0
 
 

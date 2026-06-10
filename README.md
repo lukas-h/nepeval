@@ -79,6 +79,8 @@ export NEPEVAL_API_TOKEN='...'
 python scripts/run_openai_compatible_api_benchmarks.py
 ```
 
+The runner defaults to 8 concurrent requests. Override with `--concurrency N` if the API needs a lower or higher request rate.
+
 For the current hosted API, the model discovery endpoint returns:
 
 - `himalaya-bf16`
@@ -97,7 +99,8 @@ Each run writes:
 - `summary.json`: aggregate stats for every model.
 - `summary.md`: compact Markdown table for review.
 - `models/<model>/summary.json`: per-model aggregate stats.
-- `models/<model>/samples.jsonl`: every prompt, response, score, latency, finish reason, and raw API response.
+- `models/<model>/samples.jsonl`: every prompt, response, score, latency, finish reason, and raw API response. This file is streamed while the run is active.
+- `models/<model>/progress.json`: live per-model completion count while the run is active.
 
 The persisted metrics are:
 
