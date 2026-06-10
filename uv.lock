@@ -1269,6 +1269,7 @@ source = { virtual = "." }
 dependencies = [
     { name = "huggingface-hub" },
     { name = "pyarrow" },
+    { name = "requests" },
 ]
 
 [package.optional-dependencies]
@@ -1289,6 +1290,7 @@ requires-dist = [
     { name = "lm-eval", marker = "extra == 'eval'", specifier = ">=0.4.8" },
     { name = "nltk", marker = "extra == 'eval'", specifier = ">=3.9.1" },
     { name = "pyarrow", specifier = ">=15.0.0" },
+    { name = "requests", specifier = ">=2.32.0" },
 ]
 provides-extras = ["eval"]
 

@@ -6,7 +6,5 @@ __pycache__/
 .mypy_cache/
 .pytest_cache/
 .cache/
-results/
 outputs/
 wandb/
-

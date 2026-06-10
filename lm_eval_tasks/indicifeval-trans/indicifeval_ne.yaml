@@ -1,8 +1,10 @@
 task: indicifeval_trans_ne
-dataset_path: ai4bharat/IndicIFEval
-dataset_name: indicifeval-trans
+dataset_path: json
+dataset_kwargs:
+  data_files:
+    test: data/indicifeval_ne/indicifeval-trans/ne.jsonl
 output_type: generate_until
-test_split: ne
+test_split: test
 num_fewshot: 0
 doc_to_text: prompt
 doc_to_target: 0

@@ -2,6 +2,8 @@
 
 Nepali-only setup for running [AI4Bharat IndicIFEval](https://huggingface.co/datasets/ai4bharat/IndicIFEval) against a local model.
 
+The project goal is to maintain reproducible Nepali AI evaluations: Nepali-only benchmark data, executable evaluation code, raw model outputs, and aggregate benchmark stats are all kept in this repo.
+
 This repo is intentionally scoped to Nepali (`ne`) only. The upstream dataset card lists two relevant tracks:
 
 - `indicifeval-ground`, split `ne`: 341 rows
@@ -65,6 +67,46 @@ lm_eval \
 ```
 
 The only task YAMLs present in `lm_eval_tasks` are the Nepali tasks, so the wrapper cannot accidentally select Hindi, Bengali, Marathi, or other Indic language splits unless new task files are added later.
+
+## Run HimalayaGPT API Models
+
+The OpenAI-compatible runner discovers every model from `https://himalayagpt.api.scalabs.ai/v1/models`, runs both Nepali benchmark tracks against each model, and stores raw samples plus aggregate stats under `results/himalayagpt/<run-id>/`.
+
+Keep the bearer token in the environment:
+
+```bash
+export NEPEVAL_API_TOKEN='...'
+python scripts/run_openai_compatible_api_benchmarks.py
+```
+
+For the current hosted API, the model discovery endpoint returns:
+
+- `himalaya-bf16`
+- `himalaya-q8`
+- `himalaya-q4`
+
+Useful smoke test:
+
+```bash
+NEPEVAL_API_TOKEN='...' python scripts/run_openai_compatible_api_benchmarks.py --limit 2 --output-dir results/himalayagpt/smoke
+```
+
+Each run writes:
+
+- `run_config.json`: model list, generation settings, data/task metadata.
+- `summary.json`: aggregate stats for every model.
+- `summary.md`: compact Markdown table for review.
+- `models/<model>/summary.json`: per-model aggregate stats.
+- `models/<model>/samples.jsonl`: every prompt, response, score, latency, finish reason, and raw API response.
+
+The persisted metrics are:
+
+- `prompt_level_strict_acc`
+- `inst_level_strict_acc`
+- `prompt_level_loose_acc`
+- `inst_level_loose_acc`
+
+The runner uses the same vendored Nepali instruction checkers as the lm-eval task configs.
 
 ## Attribution
 
