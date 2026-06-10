@@ -111,6 +111,20 @@ The persisted metrics are:
 
 The runner uses the same vendored Nepali instruction checkers as the lm-eval task configs.
 
+## Compare Quantizations
+
+Keep each quantization as a separate benchmark artifact, then generate a comparison table from their per-model summaries:
+
+```bash
+python scripts/summarize_quantization_results.py \
+  --output-prefix results/himalayagpt/quantization_comparison \
+  results/himalayagpt/<bf16-run-dir> \
+  results/himalayagpt/<q8-run-dir> \
+  results/himalayagpt/<q4-run-dir>
+```
+
+This writes `quantization_comparison.json` and `quantization_comparison.md` without merging or discarding the raw per-quantization samples.
+
 ## Attribution
 
 This project uses and adapts the Nepali (`ne`) splits from:
