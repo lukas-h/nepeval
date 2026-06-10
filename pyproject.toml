@@ -1,0 +1,19 @@
+[project]
+name = "nepeval"
+version = "0.1.0"
+description = "Nepali-only IndicIFEval extraction and local model evaluation helpers."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "huggingface-hub>=0.23.0",
+  "pyarrow>=15.0.0",
+]
+
+[project.optional-dependencies]
+eval = [
+  "immutabledict>=4.2.0",
+  "indic-nlp-library>=0.92",
+  "langdetect>=1.0.9",
+  "lm-eval>=0.4.8",
+  "nltk>=3.9.1",
+]

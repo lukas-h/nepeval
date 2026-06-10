@@ -1,0 +1,28 @@
+{
+  "source_dataset": "ai4bharat/IndicIFEval",
+  "source_url": "https://huggingface.co/datasets/ai4bharat/IndicIFEval",
+  "revision": "main",
+  "language_split": "ne",
+  "license": "cc-by-4.0",
+  "generated_at": "2026-06-10T14:35:31.359434+00:00",
+  "tracks": {
+    "indicifeval-ground": {
+      "rows": 341,
+      "source_files": [
+        "indicifeval-ground/ne-00000-of-00001.parquet"
+      ],
+      "path": "data/indicifeval_ne/indicifeval-ground/ne.jsonl"
+    },
+    "indicifeval-trans": {
+      "rows": 490,
+      "source_files": [
+        "indicifeval-trans/ne-00000-of-00001.parquet"
+      ],
+      "path": "data/indicifeval_ne/indicifeval-trans/ne.jsonl"
+    }
+  },
+  "combined": {
+    "rows": 831,
+    "path": "data/indicifeval_ne/all.jsonl"
+  }
+}
