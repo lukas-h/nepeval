@@ -49,6 +49,56 @@ def metric(value: float | None) -> str:
     return "" if value is None else f"{value:.4f}"
 
 
+def has_pass_at_k(rows: list[dict[str, Any]]) -> bool:
+    return all(bool(row.get("pass_at_k")) for row in rows)
+
+
+def pass_at_k_values(rows: list[dict[str, Any]]) -> list[int]:
+    values = set()
+    for row in rows:
+        values.update(int(k) for k in (row.get("pass_at_k") or {}).keys())
+    return sorted(values)
+
+
+def pass_metric(row: dict[str, Any], k: int, metric_name: str) -> float | None:
+    return (row.get("pass_at_k") or {}).get(str(k), {}).get(metric_name)
+
+
+def append_pass_at_k_table(
+    *,
+    lines: list[str],
+    rows: list[dict[str, Any]],
+    title: str,
+    prompt_metric: str,
+    inst_metric: str,
+    prompt_label: str,
+    inst_label: str,
+) -> None:
+    k_values = pass_at_k_values(rows)
+    header = (
+        ["Model", "Quantization"]
+        + [f"{prompt_label}@{k}" for k in k_values]
+        + [f"{inst_label}@{k}" for k in k_values]
+        + ["Errors", "Prompts", "Completions"]
+    )
+    lines.extend([title, ""])
+    lines.append("| " + " | ".join(header) + " |")
+    lines.append("| " + " | ".join(["---", "---"] + ["---:" for _ in header[2:]]) + " |")
+    for row in sorted(rows, key=quantization_sort_key):
+        values = [row["model"], row["quantization"]]
+        values.extend(metric(pass_metric(row, k, prompt_metric)) for k in k_values)
+        values.extend(metric(pass_metric(row, k, inst_metric)) for k in k_values)
+        values.extend(
+            [
+                str(row.get("errored_completions", row.get("errored_examples"))),
+                str(row.get("examples")),
+                str(row.get("completions", row.get("examples"))),
+            ]
+        )
+        lines.append("| " + " | ".join(values) + " |")
+    lines.append("")
+
+
 def write_markdown(path: Path, rows: list[dict[str, Any]]) -> None:
     generation_settings = {
         json.dumps(row.get("generation", {}), sort_keys=True) for row in rows
@@ -73,25 +123,47 @@ def write_markdown(path: Path, rows: list[dict[str, Any]]) -> None:
                 "",
             ]
         )
-    lines.extend(
-        [
-        "| Model | Quantization | Prompt Strict | Inst Strict | Prompt Loose | Inst Loose | Errors | Samples |",
-        "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |",
-        ]
-    )
-    for row in sorted(rows, key=quantization_sort_key):
-        lines.append(
-            "| {model} | {quantization} | {prompt_strict} | {inst_strict} | {prompt_loose} | {inst_loose} | {errors} | {samples} |".format(
-                model=row["model"],
-                quantization=row["quantization"],
-                prompt_strict=metric(row.get("prompt_level_strict_acc")),
-                inst_strict=metric(row.get("inst_level_strict_acc")),
-                prompt_loose=metric(row.get("prompt_level_loose_acc")),
-                inst_loose=metric(row.get("inst_level_loose_acc")),
-                errors=row.get("errored_examples"),
-                samples=row.get("examples"),
-            )
+
+    if has_pass_at_k(rows):
+        append_pass_at_k_table(
+            lines=lines,
+            rows=rows,
+            title="**Strict Pass@k**",
+            prompt_metric="prompt_level_strict_acc",
+            inst_metric="inst_level_strict_acc",
+            prompt_label="Prompt Strict",
+            inst_label="Inst Strict",
         )
+        append_pass_at_k_table(
+            lines=lines,
+            rows=rows,
+            title="**Loose Pass@k**",
+            prompt_metric="prompt_level_loose_acc",
+            inst_metric="inst_level_loose_acc",
+            prompt_label="Prompt Loose",
+            inst_label="Inst Loose",
+        )
+    else:
+        lines.extend(
+            [
+                "| Model | Quantization | Prompt Strict | Inst Strict | Prompt Loose | Inst Loose | Errors | Samples |",
+                "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |",
+            ]
+        )
+        for row in sorted(rows, key=quantization_sort_key):
+            lines.append(
+                "| {model} | {quantization} | {prompt_strict} | {inst_strict} | {prompt_loose} | {inst_loose} | {errors} | {samples} |".format(
+                    model=row["model"],
+                    quantization=row["quantization"],
+                    prompt_strict=metric(row.get("prompt_level_strict_acc")),
+                    inst_strict=metric(row.get("inst_level_strict_acc")),
+                    prompt_loose=metric(row.get("prompt_level_loose_acc")),
+                    inst_loose=metric(row.get("inst_level_loose_acc")),
+                    errors=row.get("errored_examples"),
+                    samples=row.get("examples"),
+                )
+            )
+
     lines.append("")
     lines.append("Each row is computed from that model's separate raw `samples.jsonl` benchmark artifact.")
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")

@@ -109,6 +109,25 @@ The persisted metrics are:
 - `prompt_level_loose_acc`
 - `inst_level_loose_acc`
 
+For multi-sample runs, the runner also writes `pass_at_k` metrics. `pass@k`
+generates several independent completions for each prompt and estimates the
+chance that at least one of `k` attempts passes the checker. Use nonzero
+temperature for this mode so retries are meaningfully different:
+
+```bash
+NEPEVAL_API_TOKEN='...' python scripts/run_openai_compatible_api_benchmarks.py \
+  --temperature 0.2 \
+  --max-tokens 256 \
+  --samples-per-prompt 10 \
+  --pass-at-k 1 5 10 \
+  --progress-every 100
+```
+
+This preserves every raw completion in `samples.jsonl` and reports:
+
+- `prompt_level_strict_acc` / `prompt_level_loose_acc`: pass@k at the prompt level.
+- `inst_level_strict_acc` / `inst_level_loose_acc`: pass@k averaged over instruction-level checks.
+
 The runner uses the same vendored Nepali instruction checkers as the lm-eval task configs.
 
 ## Compare Quantizations

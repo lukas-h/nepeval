@@ -7,6 +7,7 @@ import argparse
 import concurrent.futures
 import importlib.util
 import json
+import math
 import os
 import statistics
 import sys
@@ -49,12 +50,38 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--temperature", type=float, default=0.0)
     parser.add_argument("--max-tokens", type=int, default=1280)
     parser.add_argument("--seed", type=int, default=1234)
+    parser.add_argument(
+        "--samples-per-prompt",
+        type=int,
+        default=None,
+        help="Number of independent completions to collect for each prompt. Defaults to max(--pass-at-k).",
+    )
+    parser.add_argument(
+        "--pass-at-k",
+        type=int,
+        nargs="+",
+        default=[1],
+        help="Report pass@k estimates for these k values.",
+    )
     parser.add_argument("--timeout", type=float, default=300.0)
     parser.add_argument("--retries", type=int, default=3)
     parser.add_argument("--concurrency", type=int, default=8)
+    parser.add_argument("--progress-every", type=int, default=25)
     parser.add_argument("--limit", type=int, default=None, help="Optional per-track smoke-test limit.")
     parser.add_argument("--store-raw-api-response", action=argparse.BooleanOptionalAction, default=True)
-    return parser.parse_args()
+    args = parser.parse_args()
+    args.pass_at_k = sorted(set(args.pass_at_k))
+    if not args.pass_at_k or args.pass_at_k[0] < 1:
+        raise SystemExit("--pass-at-k values must be positive integers.")
+    if args.samples_per_prompt is None:
+        args.samples_per_prompt = max(args.pass_at_k)
+    if args.samples_per_prompt < 1:
+        raise SystemExit("--samples-per-prompt must be positive.")
+    if args.samples_per_prompt < max(args.pass_at_k):
+        raise SystemExit("--samples-per-prompt must be at least max(--pass-at-k).")
+    if args.progress_every < 1:
+        raise SystemExit("--progress-every must be positive.")
+    return args
 
 
 def timestamp() -> str:
@@ -149,22 +176,26 @@ def extract_message_content(payload: dict[str, Any]) -> tuple[str, str | None]:
 def evaluate_one(
     *,
     doc: EvalDoc,
+    sample_index: int,
     model: str,
     base_url: str,
     token: str,
     args: argparse.Namespace,
     task_utils: dict[str, Any],
 ) -> dict[str, Any]:
+    request_seed = args.seed + sample_index
     request_body = {
         "model": model,
         "messages": [{"role": "user", "content": doc.row["prompt"]}],
         "temperature": args.temperature,
         "max_tokens": args.max_tokens,
-        "seed": args.seed,
+        "seed": request_seed,
     }
 
     result: dict[str, Any] = {
         "sample_id": doc.sample_id,
+        "completion_id": f"{doc.sample_id}:sample-{sample_index}",
+        "sample_index": sample_index,
         "track": doc.track,
         "dataset_index": doc.index,
         "key": doc.row.get("key"),
@@ -178,7 +209,7 @@ def evaluate_one(
         "request": {
             "temperature": args.temperature,
             "max_tokens": args.max_tokens,
-            "seed": args.seed,
+            "seed": request_seed,
         },
     }
 
@@ -242,17 +273,110 @@ def mean_bool(values: list[bool]) -> float | None:
     return sum(1 for value in values if value) / len(values)
 
 
-def summarize_samples(samples: list[dict[str, Any]]) -> dict[str, Any]:
+def mean_float(values: list[float]) -> float | None:
+    if not values:
+        return None
+    return statistics.fmean(values)
+
+
+def estimate_pass_at_k(num_samples: int, num_correct: int, k: int) -> float | None:
+    """Unbiased pass@k estimator from Codex/HumanEval style evaluation."""
+    if num_samples < k:
+        return None
+    if num_correct <= 0:
+        return 0.0
+    if num_samples - num_correct < k:
+        return 1.0
+    return 1.0 - math.comb(num_samples - num_correct, k) / math.comb(num_samples, k)
+
+
+def group_prompt_samples(samples: list[dict[str, Any]]) -> dict[tuple[str, int], list[dict[str, Any]]]:
+    groups: dict[tuple[str, int], list[dict[str, Any]]] = {}
+    for sample in samples:
+        groups.setdefault((sample["track"], sample["dataset_index"]), []).append(sample)
+    for group in groups.values():
+        group.sort(key=lambda sample: sample["sample_index"])
+    return groups
+
+
+def summarize_pass_at_k(samples: list[dict[str, Any]], k_values: list[int]) -> dict[str, dict[str, float | None]]:
+    groups = group_prompt_samples(samples)
+    summary: dict[str, dict[str, float | None]] = {}
+    for k in k_values:
+        prompt_strict: list[float] = []
+        prompt_loose: list[float] = []
+        inst_strict: list[float] = []
+        inst_loose: list[float] = []
+        for group in groups.values():
+            num_samples = len(group)
+            prompt_strict_value = estimate_pass_at_k(
+                num_samples,
+                sum(1 for sample in group if sample["metrics"]["prompt_level_strict_acc"]),
+                k,
+            )
+            prompt_loose_value = estimate_pass_at_k(
+                num_samples,
+                sum(1 for sample in group if sample["metrics"]["prompt_level_loose_acc"]),
+                k,
+            )
+            if prompt_strict_value is not None:
+                prompt_strict.append(prompt_strict_value)
+            if prompt_loose_value is not None:
+                prompt_loose.append(prompt_loose_value)
+
+            num_instructions = len(group[0]["metrics"]["inst_level_strict_acc"]) if group else 0
+            for instruction_index in range(num_instructions):
+                strict_value = estimate_pass_at_k(
+                    num_samples,
+                    sum(
+                        1
+                        for sample in group
+                        if instruction_index < len(sample["metrics"]["inst_level_strict_acc"])
+                        and sample["metrics"]["inst_level_strict_acc"][instruction_index]
+                    ),
+                    k,
+                )
+                loose_value = estimate_pass_at_k(
+                    num_samples,
+                    sum(
+                        1
+                        for sample in group
+                        if instruction_index < len(sample["metrics"]["inst_level_loose_acc"])
+                        and sample["metrics"]["inst_level_loose_acc"][instruction_index]
+                    ),
+                    k,
+                )
+                if strict_value is not None:
+                    inst_strict.append(strict_value)
+                if loose_value is not None:
+                    inst_loose.append(loose_value)
+
+        summary[str(k)] = {
+            "prompt_level_strict_acc": mean_float(prompt_strict),
+            "inst_level_strict_acc": mean_float(inst_strict),
+            "prompt_level_loose_acc": mean_float(prompt_loose),
+            "inst_level_loose_acc": mean_float(inst_loose),
+        }
+    return summary
+
+
+def summarize_samples(samples: list[dict[str, Any]], k_values: list[int]) -> dict[str, Any]:
     by_track: dict[str, list[dict[str, Any]]] = {}
     for sample in samples:
         by_track.setdefault(sample["track"], []).append(sample)
 
+    prompt_groups = group_prompt_samples(samples)
     summary = {
-        "examples": len(samples),
+        "examples": len(prompt_groups),
+        "completions": len(samples),
+        "samples_per_prompt": max((len(group) for group in prompt_groups.values()), default=0),
         "errored_examples": sum(1 for sample in samples if not sample["ok"]),
+        "errored_completions": sum(1 for sample in samples if not sample["ok"]),
+        "prompts_with_errors": sum(1 for group in prompt_groups.values() if any(not sample["ok"] for sample in group)),
         "tracks": {},
     }
     for track, track_samples in sorted(by_track.items()):
+        track_groups = group_prompt_samples(track_samples)
         strict_inst = [
             value
             for sample in track_samples
@@ -270,8 +394,12 @@ def summarize_samples(samples: list[dict[str, Any]]) -> dict[str, Any]:
             finish_reasons[finish_reason] = finish_reasons.get(finish_reason, 0) + 1
 
         summary["tracks"][track] = {
-            "examples": len(track_samples),
+            "examples": len(track_groups),
+            "completions": len(track_samples),
+            "samples_per_prompt": max((len(group) for group in track_groups.values()), default=0),
             "errored_examples": sum(1 for sample in track_samples if not sample["ok"]),
+            "errored_completions": sum(1 for sample in track_samples if not sample["ok"]),
+            "prompts_with_errors": sum(1 for group in track_groups.values() if any(not sample["ok"] for sample in group)),
             "prompt_level_strict_acc": mean_bool(
                 [sample["metrics"]["prompt_level_strict_acc"] for sample in track_samples]
             ),
@@ -285,6 +413,7 @@ def summarize_samples(samples: list[dict[str, Any]]) -> dict[str, Any]:
             "avg_response_chars": statistics.fmean(len(sample["response"]) for sample in track_samples),
             "finish_reason_counts": finish_reasons,
         }
+        summary["tracks"][track]["pass_at_k"] = summarize_pass_at_k(track_samples, k_values)
 
     all_strict_inst = [
         value for sample in samples for value in sample["metrics"]["inst_level_strict_acc"]
@@ -305,6 +434,7 @@ def summarize_samples(samples: list[dict[str, Any]]) -> dict[str, Any]:
             "inst_level_loose_acc": mean_bool(all_loose_inst),
             "avg_latency_sec": statistics.fmean(all_latencies) if all_latencies else None,
             "total_latency_sec": sum(all_latencies),
+            "pass_at_k": summarize_pass_at_k(samples, k_values),
         }
     )
     return summary
@@ -325,7 +455,12 @@ def run_model(
     samples_path = model_dir / "samples.jsonl"
     progress_path = model_dir / "progress.json"
     started_at = datetime.now(timezone.utc).isoformat()
-    print(f"running {model} on {len(docs)} Nepali examples", flush=True)
+    jobs = [(doc, sample_index) for doc in docs for sample_index in range(args.samples_per_prompt)]
+    print(
+        f"running {model} on {len(docs)} Nepali examples x {args.samples_per_prompt} samples "
+        f"({len(jobs)} completions)",
+        flush=True,
+    )
 
     samples: list[dict[str, Any]] = []
     with concurrent.futures.ThreadPoolExecutor(max_workers=args.concurrency) as executor:
@@ -333,32 +468,35 @@ def run_model(
             executor.submit(
                 evaluate_one,
                 doc=doc,
+                sample_index=sample_index,
                 model=model,
                 base_url=base_url,
                 token=token,
                 args=args,
                 task_utils=task_utils,
             )
-            for doc in docs
+            for doc, sample_index in jobs
         ]
         with samples_path.open("w", encoding="utf-8") as samples_handle:
             for completed, future in enumerate(concurrent.futures.as_completed(futures), start=1):
                 sample = future.result()
                 samples.append(sample)
                 append_jsonl(samples_handle, sample)
-                if completed % 25 == 0 or completed == len(futures):
+                if completed % args.progress_every == 0 or completed == len(futures):
                     progress = {
                         "model": model,
-                        "completed_examples": completed,
-                        "total_examples": len(futures),
-                        "errored_examples": sum(1 for item in samples if not item["ok"]),
+                        "completed_completions": completed,
+                        "total_completions": len(futures),
+                        "examples": len(docs),
+                        "samples_per_prompt": args.samples_per_prompt,
+                        "errored_completions": sum(1 for item in samples if not item["ok"]),
                         "updated_at": datetime.now(timezone.utc).isoformat(),
                     }
                     write_json(progress_path, progress)
-                    print(f"  {model}: {completed}/{len(futures)}", flush=True)
+                    print(f"  {model}: {completed}/{len(futures)} completions", flush=True)
 
-    samples.sort(key=lambda sample: (sample["track"], sample["dataset_index"]))
-    summary = summarize_samples(samples)
+    samples.sort(key=lambda sample: (sample["track"], sample["dataset_index"], sample["sample_index"]))
+    summary = summarize_samples(samples, args.pass_at_k)
     summary.update(
         {
             "model": model,
@@ -369,6 +507,7 @@ def run_model(
                 "max_tokens": args.max_tokens,
                 "seed": args.seed,
             },
+            "pass_at_k_values": args.pass_at_k,
         }
     )
     write_jsonl(samples_path, samples)
@@ -376,29 +515,80 @@ def run_model(
     return summary
 
 
+def metric(value: float | None) -> str:
+    return "" if value is None else f"{value:.4f}"
+
+
+def pass_at_k_value(model_summary: dict[str, Any], k: int, metric_name: str) -> float | None:
+    return (model_summary.get("pass_at_k") or {}).get(str(k), {}).get(metric_name)
+
+
 def write_markdown_summary(path: Path, run_summary: dict[str, Any]) -> None:
+    k_values = run_summary.get("pass_at_k_values") or [1]
     lines = [
         "# HimalayaGPT Nepali IndicIFEval Results",
         "",
         f"- Run ID: `{run_summary['run_id']}`",
         f"- API base URL: `{run_summary['api_base_url']}`",
         f"- Examples per model: `{run_summary['examples_per_model']}`",
+        f"- Samples per prompt: `{run_summary['samples_per_prompt']}`",
+        f"- pass@k values: `{', '.join(str(k) for k in k_values)}`",
         f"- Generated at: `{run_summary['completed_at']}`",
         "",
-        "| Model | Prompt Strict | Inst Strict | Prompt Loose | Inst Loose | Errors |",
-        "| --- | ---: | ---: | ---: | ---: | ---: |",
     ]
-    for model in run_summary["models"]:
-        lines.append(
-            "| {model} | {ps:.4f} | {is_:.4f} | {pl:.4f} | {il:.4f} | {errors} |".format(
-                model=model["model"],
-                ps=model["prompt_level_strict_acc"] or 0.0,
-                is_=model["inst_level_strict_acc"] or 0.0,
-                pl=model["prompt_level_loose_acc"] or 0.0,
-                il=model["inst_level_loose_acc"] or 0.0,
-                errors=model["errored_examples"],
-            )
+
+    if len(k_values) == 1 and run_summary.get("samples_per_prompt") == 1:
+        lines.extend(
+            [
+                "| Model | Prompt Strict | Inst Strict | Prompt Loose | Inst Loose | Errors |",
+                "| --- | ---: | ---: | ---: | ---: | ---: |",
+            ]
         )
+        for model in run_summary["models"]:
+            lines.append(
+                "| {model} | {ps:.4f} | {is_:.4f} | {pl:.4f} | {il:.4f} | {errors} |".format(
+                    model=model["model"],
+                    ps=model["prompt_level_strict_acc"] or 0.0,
+                    is_=model["inst_level_strict_acc"] or 0.0,
+                    pl=model["prompt_level_loose_acc"] or 0.0,
+                    il=model["inst_level_loose_acc"] or 0.0,
+                    errors=model["errored_completions"],
+                )
+            )
+    else:
+        strict_header = (
+            ["Model"]
+            + [f"Prompt Strict@{k}" for k in k_values]
+            + [f"Inst Strict@{k}" for k in k_values]
+            + ["Errors"]
+        )
+        loose_header = (
+            ["Model"]
+            + [f"Prompt Loose@{k}" for k in k_values]
+            + [f"Inst Loose@{k}" for k in k_values]
+            + ["Errors"]
+        )
+
+        lines.extend(["**Strict Pass@k**", ""])
+        lines.append("| " + " | ".join(strict_header) + " |")
+        lines.append("| " + " | ".join(["---"] + ["---:" for _ in strict_header[1:]]) + " |")
+        for model in run_summary["models"]:
+            row = [model["model"]]
+            row.extend(metric(pass_at_k_value(model, k, "prompt_level_strict_acc")) for k in k_values)
+            row.extend(metric(pass_at_k_value(model, k, "inst_level_strict_acc")) for k in k_values)
+            row.append(str(model["errored_completions"]))
+            lines.append("| " + " | ".join(row) + " |")
+
+        lines.extend(["", "**Loose Pass@k**", ""])
+        lines.append("| " + " | ".join(loose_header) + " |")
+        lines.append("| " + " | ".join(["---"] + ["---:" for _ in loose_header[1:]]) + " |")
+        for model in run_summary["models"]:
+            row = [model["model"]]
+            row.extend(metric(pass_at_k_value(model, k, "prompt_level_loose_acc")) for k in k_values)
+            row.extend(metric(pass_at_k_value(model, k, "inst_level_loose_acc")) for k in k_values)
+            row.append(str(model["errored_completions"]))
+            lines.append("| " + " | ".join(row) + " |")
+
     lines.append("")
     lines.append("The bearer token is not stored in this repository; reruns require `NEPEVAL_API_TOKEN` or `OPENAI_API_KEY`.")
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -426,6 +616,9 @@ def main() -> int:
         "discovered_models": models_payload,
         "tasks": [track for track, _path, _utils_path in TASKS],
         "examples_per_model": len(docs),
+        "completions_per_model": len(docs) * args.samples_per_prompt,
+        "samples_per_prompt": args.samples_per_prompt,
+        "pass_at_k_values": args.pass_at_k,
         "limit_per_track": args.limit,
         "generation": {
             "temperature": args.temperature,
