@@ -117,7 +117,7 @@ temperature for this mode so retries are meaningfully different:
 ```bash
 NEPEVAL_API_TOKEN='...' python scripts/run_openai_compatible_api_benchmarks.py \
   --temperature 0.2 \
-  --max-tokens 256 \
+  --max-tokens 512 \
   --samples-per-prompt 10 \
   --pass-at-k 1 5 10 \
   --progress-every 100
