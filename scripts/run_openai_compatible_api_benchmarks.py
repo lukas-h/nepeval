@@ -619,6 +619,7 @@ def main() -> int:
         "completions_per_model": len(docs) * args.samples_per_prompt,
         "samples_per_prompt": args.samples_per_prompt,
         "pass_at_k_values": args.pass_at_k,
+        "store_raw_api_response": args.store_raw_api_response,
         "limit_per_track": args.limit,
         "generation": {
             "temperature": args.temperature,

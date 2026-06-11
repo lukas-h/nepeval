@@ -99,7 +99,7 @@ Each run writes:
 - `summary.json`: aggregate stats for every model.
 - `summary.md`: compact Markdown table for review.
 - `models/<model>/summary.json`: per-model aggregate stats.
-- `models/<model>/samples.jsonl`: every prompt, response, score, latency, finish reason, and raw API response. This file is streamed while the run is active.
+- `models/<model>/samples.jsonl`: every prompt, response, score, latency, finish reason, and optional raw API response. This file is streamed while the run is active.
 - `models/<model>/progress.json`: live per-model completion count while the run is active.
 
 The persisted metrics are:
